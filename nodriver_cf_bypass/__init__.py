@@ -63,20 +63,27 @@ class CFBypass:
     async def find_cloudflare_iframe(self) -> Element | None:
         try:
             obvious_cloudflare_iframe_source: str = "challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile/if/ov2/av0/rcv"
-            
             iframes: list[Element] = [iframe for iframe in await self.BROWSER_TAB.find_all("iframe") if iframe.get("src")]
 
             for iframe in iframes:
                 if obvious_cloudflare_iframe_source in iframe.get("src"):
                     return iframe
             
+            for iframe in iframes:
+                iframe_id = iframe.get("id") or ""
+                iframe_class = iframe.get("class") or ""
+                if "cf-" in iframe_id.lower() or "turnstile" in iframe_id.lower() or "cf-" in iframe_class.lower():
+                    await self.show_log(f"Found potential Cloudflare iframe with id={iframe_id}, class={iframe_class}")
+                    return iframe
+
+            await self.show_log("No Cloudflare iframe found.")
             return None
 
         except Exception as e:
-            await self.show_log(e)
+            await self.show_log(f"Error finding iframe: {e}")
             return None
 
-    async def bypass(self, _max_retries: int = 10, _interval_between_retries: float | int = 1,  _reload_page_after_n_retries = 0) -> bool:
+    async def bypass(self, _max_retries: int = 10, _interval_between_retries: float | int = 1, _reload_page_after_n_retries = 0) -> bool:
         await self.show_log("Bypassing cloudflare...")
 
         retries: int = 0
@@ -92,21 +99,25 @@ class CFBypass:
             await asyncio.sleep(delay = _interval_between_retries)
 
             iframe: Element | None = await self.find_cloudflare_iframe()
+            if iframe is None:
+                await self.show_log("No Cloudflare iframe found.")
+                if not await self.is_cloudflare_presented():
+                    await self.show_log("Cloudflare has been bypassed successfully (no iframe required).")
+                    return True
+                continue  
+
             try:
                 await iframe.mouse_click()
-
-            except AttributeError as e: # There is no cloudflare iframe on site.
-                await self.show_log(e)
+                await self.show_log("Clicked Cloudflare iframe.")
+            except Exception as e:
+                await self.show_log(f"Error clicking iframe: {e}")
                 if not await self.is_cloudflare_presented():
-                    break
-
-            except Exception as e: # The iframe could not be loaded on site.
-                await self.show_log(e)
+                    await self.show_log("Cloudflare has been bypassed successfully despite error.")
+                    return True
 
         if await self.is_cloudflare_presented():
             await self.show_log("Cloudflare could not be bypassed for an unknown reason.")
+            return False
 
-        else:
-            await self.show_log("Cloudflare has been bypassed successfully.")
-
-        return not await self.is_cloudflare_presented() # Return True if cloudflare was bypassed successfully.
+        await self.show_log("Cloudflare has been bypassed successfully.")
+        return True
